@@ -72,7 +72,8 @@ class UrlConnectionVaultProxyTransport implements VaultProxyTransport {
     int statusCode = connection.getResponseCode();
     try (InputStream input =
         statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
-      return new Response(statusCode, input == null ? "" : VaultProxyTransport.readUtf8(input));
+      return new Response(
+          statusCode, input == null ? new byte[0] : VaultProxyTransport.readBody(input));
     } finally {
       connection.disconnect();
     }

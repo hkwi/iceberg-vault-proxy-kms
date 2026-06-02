@@ -20,8 +20,6 @@ package io.github.hkwi.iceberg.vault;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import javax.net.ssl.SSLSocketFactory;
@@ -50,9 +48,7 @@ public class VaultProxyKeyManagementClient implements KeyManagementClient {
     key.duplicate().get(keyBytes);
 
     try {
-      String plaintext = Base64.getEncoder().encodeToString(keyBytes);
-      String ciphertext = transitClient().encrypt(wrappingKeyId, plaintext);
-      return ByteBuffer.wrap(ciphertext.getBytes(StandardCharsets.UTF_8));
+      return ByteBuffer.wrap(transitClient().encrypt(wrappingKeyId, keyBytes));
     } finally {
       SensitiveMemory.zero(keyBytes);
     }
@@ -65,9 +61,7 @@ public class VaultProxyKeyManagementClient implements KeyManagementClient {
 
     byte[] plaintextBytes = null;
     try {
-      String ciphertext = new String(ciphertextBytes, StandardCharsets.UTF_8);
-      String plaintext = transitClient().decrypt(wrappingKeyId, ciphertext);
-      plaintextBytes = Base64.getDecoder().decode(plaintext);
+      plaintextBytes = transitClient().decrypt(wrappingKeyId, ciphertextBytes);
       return SensitiveMemory.directBufferFrom(plaintextBytes);
     } finally {
       SensitiveMemory.zero(ciphertextBytes);

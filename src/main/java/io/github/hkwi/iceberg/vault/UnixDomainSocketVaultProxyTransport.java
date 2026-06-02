@@ -119,7 +119,7 @@ class UnixDomainSocketVaultProxyTransport implements VaultProxyTransport {
       body = input.readAllBytes();
     }
 
-    return new Response(statusCode, new String(body, StandardCharsets.UTF_8));
+    return new Response(statusCode, body);
   }
 
   private static byte[] readChunked(InputStream input) throws IOException {

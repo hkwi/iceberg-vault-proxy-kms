@@ -66,11 +66,13 @@ implementation without JNI/JNA. This client therefore keeps plaintext key bytes
 out of heap-backed return buffers where possible and explicitly zeroes temporary
 `byte[]` and `char[]` values after use.
 
-`unwrapKey` returns a direct `ByteBuffer` for plaintext key material. Temporary
-heap arrays used for Vault Transit base64 conversion, TLS store passwords, and
-decoded PEM private key bytes are cleared in `finally` blocks. Catalog
-properties and environment variables are still Java `String` values, so the
-preferred production setup is a local Vault Proxy that owns Vault
+`wrapKey` and `unwrapKey` avoid creating Java `String` instances for plaintext
+key material. Vault Transit plaintext base64 JSON fields are written and read
+through Jackson streaming APIs, and `unwrapKey` returns a direct `ByteBuffer`.
+Temporary heap arrays used for Vault Transit request/response bodies, TLS store
+passwords, and decoded PEM private key bytes are cleared in `finally` blocks.
+Catalog properties and environment variables are still Java `String` values, so
+the preferred production setup is a local Vault Proxy that owns Vault
 authentication and avoids passing Vault tokens to this JVM.
 
 ## Development
