@@ -1,0 +1,43 @@
+plugins {
+  id 'java-library'
+  id 'maven-publish'
+}
+
+group = 'io.github.hkwi.iceberg'
+version = '0.1.0-SNAPSHOT'
+
+def icebergVersion = providers.gradleProperty('icebergVersion').getOrElse('1.11.0-SNAPSHOT')
+def jacksonVersion = providers.gradleProperty('jacksonVersion').getOrElse('2.21.3')
+def junitVersion = providers.gradleProperty('junitVersion').getOrElse('5.14.4')
+def assertjVersion = providers.gradleProperty('assertjVersion').getOrElse('3.27.7')
+
+java {
+  withSourcesJar()
+}
+
+dependencies {
+  api "org.apache.iceberg:iceberg-core:${icebergVersion}"
+  implementation platform("com.fasterxml.jackson:jackson-bom:${jacksonVersion}")
+  implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+  testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+  testImplementation "org.assertj:assertj-core:${assertjVersion}"
+  testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+  options.encoding = 'UTF-8'
+  options.release = 17
+}
+
+test {
+  useJUnitPlatform()
+}
+
+publishing {
+  publications {
+    mavenJava(MavenPublication) {
+      from components.java
+    }
+  }
+}

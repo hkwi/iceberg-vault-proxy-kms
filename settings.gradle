@@ -1,0 +1,27 @@
+pluginManagement {
+  repositories {
+    gradlePluginPortal()
+  }
+}
+
+dependencyResolutionManagement {
+  repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+  repositories {
+    mavenCentral()
+    mavenLocal()
+  }
+}
+
+rootProject.name = 'iceberg-vault-proxy-kms'
+
+def icebergSource = file('../iceberg-vault-proxy')
+if (icebergSource.isDirectory()) {
+  includeBuild(icebergSource) {
+    dependencySubstitution {
+      substitute module('org.apache.iceberg:iceberg-core') using project(':iceberg-core')
+      substitute module('org.apache.iceberg:iceberg-api') using project(':iceberg-api')
+      substitute module('org.apache.iceberg:iceberg-common') using project(':iceberg-common')
+      substitute module('org.apache.iceberg:iceberg-bundled-guava') using project(':iceberg-bundled-guava')
+    }
+  }
+}
