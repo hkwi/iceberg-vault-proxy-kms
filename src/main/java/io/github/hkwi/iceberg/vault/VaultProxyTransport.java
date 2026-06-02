@@ -22,7 +22,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;
 import javax.net.ssl.SSLSocketFactory;
@@ -50,9 +49,9 @@ interface VaultProxyTransport extends Closeable {
   @Override
   default void close() {}
 
-  record Response(int statusCode, String body) {}
+  record Response(int statusCode, byte[] body) {}
 
-  static String readUtf8(InputStream input) throws IOException {
-    return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+  static byte[] readBody(InputStream input) throws IOException {
+    return input.readAllBytes();
   }
 }

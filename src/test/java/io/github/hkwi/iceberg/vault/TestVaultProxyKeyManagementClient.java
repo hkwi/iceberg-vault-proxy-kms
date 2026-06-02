@@ -292,6 +292,7 @@ class TestVaultProxyKeyManagementClient {
       ByteBuffer wrapped = client.wrapKey(key, "table-key");
       ByteBuffer unwrapped = client.unwrapKey(wrapped, "table-key");
 
+      assertThat(unwrapped.isDirect()).isTrue();
       assertThat(unwrapped).isEqualTo(key);
       assertThat(proxy.requests())
           .extracting(LocalVaultProxy.Request::path)
@@ -321,6 +322,7 @@ class TestVaultProxyKeyManagementClient {
       ByteBuffer wrapped = client.wrapKey(key, "table-key");
       ByteBuffer unwrapped = client.unwrapKey(wrapped, "table-key");
 
+      assertThat(unwrapped.isDirect()).isTrue();
       assertThat(unwrapped).isEqualTo(key);
     }
   }
@@ -336,6 +338,7 @@ class TestVaultProxyKeyManagementClient {
       ByteBuffer wrapped = client.wrapKey(key, "table-key");
       ByteBuffer unwrapped = client.unwrapKey(wrapped, "table-key");
 
+      assertThat(unwrapped.isDirect()).isTrue();
       assertThat(unwrapped).isEqualTo(key);
       assertThat(proxy.requests())
           .extracting(LocalVaultProxy.Request::path)

@@ -18,9 +18,11 @@
  */
 package io.github.hkwi.iceberg.vault;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -51,47 +53,119 @@ class VaultTransitClient implements Closeable {
         VaultProxyTransport.create(endpoint, connectTimeoutMs, readTimeoutMs, sslSocketFactory);
   }
 
-  String encrypt(String keyId, String plaintext) {
-    return transit("encrypt", "plaintext", "ciphertext", keyId, plaintext);
+  byte[] encrypt(String keyId, byte[] plaintext) {
+    return transit(
+        "encrypt", keyId, requestWithBinaryField("plaintext", plaintext), "ciphertext", false);
   }
 
-  String decrypt(String keyId, String ciphertext) {
-    return transit("decrypt", "ciphertext", "plaintext", keyId, ciphertext);
+  byte[] decrypt(String keyId, byte[] ciphertext) {
+    return transit(
+        "decrypt",
+        keyId,
+        requestWithUtf8StringField("ciphertext", ciphertext),
+        "plaintext",
+        true);
   }
 
-  private String transit(
-      String operation, String requestField, String responseField, String keyId, String value) {
-    ObjectNode request = MAPPER.createObjectNode();
-    request.put(requestField, value);
-
-    JsonNode data = post(operation, keyId, request);
-    checkState(data.has(responseField), "Vault proxy response has no %s", responseField);
-    return data.get(responseField).asText();
+  private byte[] transit(
+      String operation, String keyId, byte[] request, String responseField, boolean decodeBase64) {
+    byte[] response = post(operation, keyId, request);
+    try {
+      return readDataField(response, responseField, decodeBase64);
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to parse Vault proxy response", e);
+    } finally {
+      SensitiveMemory.zero(response);
+    }
   }
 
-  private JsonNode post(String operation, String keyId, ObjectNode request) {
+  private byte[] post(String operation, String keyId, byte[] request) {
     String path = requestPath(operation, keyId);
     VaultProxyTransport.Response response;
     try {
-      response = transport.post(path, headers(), MAPPER.writeValueAsBytes(request));
+      response = transport.post(path, headers(), request);
     } catch (IOException e) {
       throw new UncheckedIOException("Failed to call Vault proxy path " + path, e);
+    } finally {
+      SensitiveMemory.zero(request);
     }
 
-    checkState(
-        response.statusCode() == 200,
-        "Vault proxy request failed: HTTP %s for %s: %s",
-        response.statusCode(),
-        path,
-        truncate(response.body()));
+    if (response.statusCode() != 200) {
+      String responseBody = truncate(response.body());
+      SensitiveMemory.zero(response.body());
+      throw new IllegalStateException(
+          String.format(
+              "Vault proxy request failed: HTTP %s for %s: %s",
+              response.statusCode(), path, responseBody));
+    }
 
-    try {
-      JsonNode data = MAPPER.readTree(response.body()).get("data");
-      checkState(data != null, "Vault proxy response has no data object");
-      return data;
+    return response.body();
+  }
+
+  private static byte[] requestWithBinaryField(String field, byte[] value) {
+    try (ByteArrayOutputStream output = new ByteArrayOutputStream();
+        JsonGenerator generator = MAPPER.getFactory().createGenerator(output)) {
+      generator.writeStartObject();
+      generator.writeBinaryField(field, value);
+      generator.writeEndObject();
+      generator.flush();
+      return output.toByteArray();
     } catch (IOException e) {
-      throw new UncheckedIOException("Failed to parse Vault proxy response", e);
+      throw new UncheckedIOException("Failed to encode Vault proxy request", e);
     }
+  }
+
+  private static byte[] requestWithUtf8StringField(String field, byte[] utf8Value) {
+    try (ByteArrayOutputStream output = new ByteArrayOutputStream();
+        JsonGenerator generator = MAPPER.getFactory().createGenerator(output)) {
+      generator.writeStartObject();
+      generator.writeFieldName(field);
+      generator.writeUTF8String(utf8Value, 0, utf8Value.length);
+      generator.writeEndObject();
+      generator.flush();
+      return output.toByteArray();
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to encode Vault proxy request", e);
+    }
+  }
+
+  private static byte[] readDataField(byte[] body, String responseField, boolean decodeBase64)
+      throws IOException {
+    try (JsonParser parser = MAPPER.getFactory().createParser(body)) {
+      checkState(parser.nextToken() == JsonToken.START_OBJECT, "Vault proxy response is not JSON");
+      while (parser.nextToken() != JsonToken.END_OBJECT) {
+        String fieldName = parser.currentName();
+        JsonToken valueToken = parser.nextToken();
+        if ("data".equals(fieldName)) {
+          checkState(valueToken == JsonToken.START_OBJECT, "Vault proxy response data is not JSON");
+          return readFieldFromDataObject(parser, responseField, decodeBase64);
+        }
+        parser.skipChildren();
+      }
+    }
+
+    throw new IllegalStateException("Vault proxy response has no data object");
+  }
+
+  private static byte[] readFieldFromDataObject(
+      JsonParser parser, String responseField, boolean decodeBase64) throws IOException {
+    while (parser.nextToken() != JsonToken.END_OBJECT) {
+      String fieldName = parser.currentName();
+      JsonToken valueToken = parser.nextToken();
+      if (responseField.equals(fieldName)) {
+        checkState(
+            valueToken == JsonToken.VALUE_STRING,
+            "Vault proxy response has non-string %s",
+            responseField);
+        if (decodeBase64) {
+          return parser.getBinaryValue();
+        }
+        return parser.getText().getBytes(StandardCharsets.UTF_8);
+      }
+      parser.skipChildren();
+    }
+
+    throw new IllegalStateException(String.format("Vault proxy response has no %s", responseField));
   }
 
   private Map<String, String> headers() {
@@ -141,12 +215,15 @@ class VaultTransitClient implements Closeable {
     return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
   }
 
-  private static String truncate(String value) {
-    if (value == null || value.length() <= 2_048) {
-      return value;
+  private static String truncate(byte[] value) {
+    if (value == null || value.length == 0) {
+      return "";
+    }
+    if (value.length <= 2_048) {
+      return new String(value, StandardCharsets.UTF_8);
     }
 
-    return value.substring(0, 2_048) + "...";
+    return new String(value, 0, 2_048, StandardCharsets.UTF_8) + "...";
   }
 
   @Override

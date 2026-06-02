@@ -136,32 +136,34 @@ class VaultProxySslContext {
 
   private static KeyManager[] keyManagers(Map<String, String> properties)
       throws GeneralSecurityException {
-    KeyStore keyStore =
-        loadKeyStore(
-            properties.get(VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_LOCATION),
-            properties.get(VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_TYPE),
-            password(
-                properties,
-                VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_PASSWORD,
-                VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_PASSWORD_ENV));
-
+    char[] keyStorePassword =
+        password(
+            properties,
+            VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_PASSWORD,
+            VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_PASSWORD_ENV);
     char[] keyPassword =
         password(
             properties,
             VaultProxyProperties.VAULT_PROXY_SSL_KEY_PASSWORD,
             VaultProxyProperties.VAULT_PROXY_SSL_KEY_PASSWORD_ENV);
-    if (keyPassword == null) {
-      keyPassword =
-          password(
-              properties,
-              VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_PASSWORD,
-              VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_PASSWORD_ENV);
-    }
+    try {
+      KeyStore keyStore =
+          loadKeyStore(
+              properties.get(VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_LOCATION),
+              properties.get(VaultProxyProperties.VAULT_PROXY_SSL_KEYSTORE_TYPE),
+              keyStorePassword);
+      if (keyPassword == null && keyStorePassword != null) {
+        keyPassword = keyStorePassword.clone();
+      }
 
-    KeyManagerFactory factory =
-        KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-    factory.init(keyStore, keyPassword);
-    return factory.getKeyManagers();
+      KeyManagerFactory factory =
+          KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+      factory.init(keyStore, keyPassword);
+      return factory.getKeyManagers();
+    } finally {
+      SensitiveMemory.zero(keyStorePassword);
+      SensitiveMemory.zero(keyPassword);
+    }
   }
 
   private static KeyManager[] pemKeyManagers(Map<String, String> properties)
@@ -172,19 +174,24 @@ class VaultProxySslContext {
             properties,
             VaultProxyProperties.VAULT_PROXY_SSL_KEY_PASSWORD,
             VaultProxyProperties.VAULT_PROXY_SSL_KEY_PASSWORD_ENV);
-    PrivateKey privateKey = keyStorePrivateKey(properties, keyPassword);
-    if (keyPassword == null) {
-      keyPassword = EMPTY_PASSWORD;
+    try {
+      PrivateKey privateKey = keyStorePrivateKey(properties, keyPassword);
+      char[] keyEntryPassword = keyPassword == null ? EMPTY_PASSWORD : keyPassword;
+
+      KeyStore keyStore = emptyKeyStore();
+      keyStore.setKeyEntry(
+          "vault-proxy-client",
+          privateKey,
+          keyEntryPassword,
+          certificates.toArray(new Certificate[0]));
+
+      KeyManagerFactory factory =
+          KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+      factory.init(keyStore, keyEntryPassword);
+      return factory.getKeyManagers();
+    } finally {
+      SensitiveMemory.zero(keyPassword);
     }
-
-    KeyStore keyStore = emptyKeyStore();
-    keyStore.setKeyEntry(
-        "vault-proxy-client", privateKey, keyPassword, certificates.toArray(new Certificate[0]));
-
-    KeyManagerFactory factory =
-        KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-    factory.init(keyStore, keyPassword);
-    return factory.getKeyManagers();
   }
 
   private static TrustManager[] trustManagers(Map<String, String> properties, SslInputs inputs)
@@ -200,19 +207,25 @@ class VaultProxySslContext {
 
   private static TrustManager[] trustManagers(Map<String, String> properties)
       throws GeneralSecurityException {
-    KeyStore trustStore =
-        loadKeyStore(
-            properties.get(VaultProxyProperties.VAULT_PROXY_SSL_TRUSTSTORE_LOCATION),
-            properties.get(VaultProxyProperties.VAULT_PROXY_SSL_TRUSTSTORE_TYPE),
-            password(
-                properties,
-                VaultProxyProperties.VAULT_PROXY_SSL_TRUSTSTORE_PASSWORD,
-                VaultProxyProperties.VAULT_PROXY_SSL_TRUSTSTORE_PASSWORD_ENV));
+    char[] trustStorePassword =
+        password(
+            properties,
+            VaultProxyProperties.VAULT_PROXY_SSL_TRUSTSTORE_PASSWORD,
+            VaultProxyProperties.VAULT_PROXY_SSL_TRUSTSTORE_PASSWORD_ENV);
+    try {
+      KeyStore trustStore =
+          loadKeyStore(
+              properties.get(VaultProxyProperties.VAULT_PROXY_SSL_TRUSTSTORE_LOCATION),
+              properties.get(VaultProxyProperties.VAULT_PROXY_SSL_TRUSTSTORE_TYPE),
+              trustStorePassword);
 
-    TrustManagerFactory factory =
-        TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-    factory.init(trustStore);
-    return factory.getTrustManagers();
+      TrustManagerFactory factory =
+          TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+      factory.init(trustStore);
+      return factory.getTrustManagers();
+    } finally {
+      SensitiveMemory.zero(trustStorePassword);
+    }
   }
 
   private static TrustManager[] pemTrustManagers(Map<String, String> properties)
@@ -294,10 +307,13 @@ class VaultProxySslContext {
     List<Certificate> certificates = new ArrayList<>();
     for (PemBlock block : pemBlocks(pem, source)) {
       if (PEM_CERTIFICATE.equals(block.type())) {
-        try (ByteArrayInputStream input = new ByteArrayInputStream(block.contents())) {
+        byte[] contents = block.contents();
+        try (ByteArrayInputStream input = new ByteArrayInputStream(contents)) {
           certificates.add(factory.generateCertificate(input));
         } catch (IOException e) {
           throw new UncheckedIOException("Failed to read certificate PEM " + source, e);
+        } finally {
+          SensitiveMemory.zero(contents);
         }
       }
     }
@@ -312,12 +328,25 @@ class VaultProxySslContext {
   private static PrivateKey privateKey(String pem, String source, char[] keyPassword)
       throws GeneralSecurityException {
     for (PemBlock block : pemBlocks(pem, source)) {
+      byte[] contents = block.contents();
       if (PEM_PRIVATE_KEY.equals(block.type())) {
-        return privateKeyFromPkcs8(block.contents());
+        try {
+          return privateKeyFromPkcs8(contents);
+        } finally {
+          SensitiveMemory.zero(contents);
+        }
       } else if (PEM_ENCRYPTED_PRIVATE_KEY.equals(block.type())) {
-        return privateKeyFromEncryptedPkcs8(block.contents(), keyPassword, source);
+        try {
+          return privateKeyFromEncryptedPkcs8(contents, keyPassword, source);
+        } finally {
+          SensitiveMemory.zero(contents);
+        }
       } else if (PEM_RSA_PRIVATE_KEY.equals(block.type())) {
-        return privateKeyFromPkcs1Rsa(block.contents());
+        try {
+          return privateKeyFromPkcs1Rsa(contents);
+        } finally {
+          SensitiveMemory.zero(contents);
+        }
       }
     }
 
@@ -326,21 +355,25 @@ class VaultProxySslContext {
   }
 
   private static PrivateKey privateKeyFromPkcs8(byte[] keyBytes) throws GeneralSecurityException {
-    PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyBytes);
-    GeneralSecurityException failure = null;
-    for (String algorithm : PKCS8_PRIVATE_KEY_ALGORITHMS) {
-      try {
-        return KeyFactory.getInstance(algorithm).generatePrivate(keySpec);
-      } catch (GeneralSecurityException e) {
-        if (failure == null) {
-          failure = e;
-        } else {
-          failure.addSuppressed(e);
+    try {
+      PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyBytes);
+      GeneralSecurityException failure = null;
+      for (String algorithm : PKCS8_PRIVATE_KEY_ALGORITHMS) {
+        try {
+          return KeyFactory.getInstance(algorithm).generatePrivate(keySpec);
+        } catch (GeneralSecurityException e) {
+          if (failure == null) {
+            failure = e;
+          } else {
+            failure.addSuppressed(e);
+          }
         }
       }
-    }
 
-    throw new GeneralSecurityException("Unsupported PKCS#8 private key algorithm", failure);
+      throw new GeneralSecurityException("Unsupported PKCS#8 private key algorithm", failure);
+    } finally {
+      SensitiveMemory.zero(keyBytes);
+    }
   }
 
   private static PrivateKey privateKeyFromEncryptedPkcs8(
@@ -354,7 +387,13 @@ class VaultProxySslContext {
     EncryptedPrivateKeyInfo encryptedPrivateKeyInfo = newEncryptedPrivateKeyInfo(keyBytes, source);
     SecretKeyFactory secretKeyFactory =
         SecretKeyFactory.getInstance(encryptedPrivateKeyInfo.getAlgName());
-    SecretKey secretKey = secretKeyFactory.generateSecret(new PBEKeySpec(keyPassword));
+    PBEKeySpec keySpec = new PBEKeySpec(keyPassword);
+    SecretKey secretKey;
+    try {
+      secretKey = secretKeyFactory.generateSecret(keySpec);
+    } finally {
+      keySpec.clearPassword();
+    }
     Cipher cipher = Cipher.getInstance(encryptedPrivateKeyInfo.getAlgName());
     cipher.init(Cipher.DECRYPT_MODE, secretKey, encryptedPrivateKeyInfo.getAlgParameters());
     return privateKeyFromPkcs8(encryptedPrivateKeyInfo.getKeySpec(cipher).getEncoded());
@@ -372,9 +411,13 @@ class VaultProxySslContext {
 
   private static PrivateKey privateKeyFromPkcs1Rsa(byte[] keyBytes)
       throws GeneralSecurityException {
-    return (PrivateKey)
-        KeyFactory.getInstance("RSA")
-            .translateKey(new EncodedPrivateKey("RSA", "PKCS#1", keyBytes));
+    EncodedPrivateKey encodedKey = new EncodedPrivateKey("RSA", "PKCS#1", keyBytes);
+    try {
+      return (PrivateKey) KeyFactory.getInstance("RSA").translateKey(encodedKey);
+    } finally {
+      encodedKey.clear();
+      SensitiveMemory.zero(keyBytes);
+    }
   }
 
   private static String readPemFile(String location) {
@@ -542,6 +585,10 @@ class VaultProxySslContext {
     @Override
     public byte[] getEncoded() {
       return encoded.clone();
+    }
+
+    void clear() {
+      SensitiveMemory.zero(encoded);
     }
   }
 
