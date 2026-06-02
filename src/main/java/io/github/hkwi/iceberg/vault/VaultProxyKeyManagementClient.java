@@ -49,9 +49,13 @@ public class VaultProxyKeyManagementClient implements KeyManagementClient {
     byte[] keyBytes = new byte[key.remaining()];
     key.duplicate().get(keyBytes);
 
-    String plaintext = Base64.getEncoder().encodeToString(keyBytes);
-    String ciphertext = transitClient().encrypt(wrappingKeyId, plaintext);
-    return ByteBuffer.wrap(ciphertext.getBytes(StandardCharsets.UTF_8));
+    try {
+      String plaintext = Base64.getEncoder().encodeToString(keyBytes);
+      String ciphertext = transitClient().encrypt(wrappingKeyId, plaintext);
+      return ByteBuffer.wrap(ciphertext.getBytes(StandardCharsets.UTF_8));
+    } finally {
+      SensitiveMemory.zero(keyBytes);
+    }
   }
 
   @Override
@@ -59,9 +63,16 @@ public class VaultProxyKeyManagementClient implements KeyManagementClient {
     byte[] ciphertextBytes = new byte[wrappedKey.remaining()];
     wrappedKey.duplicate().get(ciphertextBytes);
 
-    String ciphertext = new String(ciphertextBytes, StandardCharsets.UTF_8);
-    String plaintext = transitClient().decrypt(wrappingKeyId, ciphertext);
-    return ByteBuffer.wrap(Base64.getDecoder().decode(plaintext));
+    byte[] plaintextBytes = null;
+    try {
+      String ciphertext = new String(ciphertextBytes, StandardCharsets.UTF_8);
+      String plaintext = transitClient().decrypt(wrappingKeyId, ciphertext);
+      plaintextBytes = Base64.getDecoder().decode(plaintext);
+      return SensitiveMemory.directBufferFrom(plaintextBytes);
+    } finally {
+      SensitiveMemory.zero(ciphertextBytes);
+      SensitiveMemory.zero(plaintextBytes);
+    }
   }
 
   private VaultTransitClient transitClient() {

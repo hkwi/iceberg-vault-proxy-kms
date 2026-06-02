@@ -59,6 +59,20 @@ file timestamps before creating TLS sockets and reloads the SSL context after a
 timestamp change. Inline PEM values are not reloadable because they have no file
 timestamp.
 
+## Sensitive Memory Handling
+
+Java cannot provide the same process-wide `mlock` semantics as the Go
+implementation without JNI/JNA. This client therefore keeps plaintext key bytes
+out of heap-backed return buffers where possible and explicitly zeroes temporary
+`byte[]` and `char[]` values after use.
+
+`unwrapKey` returns a direct `ByteBuffer` for plaintext key material. Temporary
+heap arrays used for Vault Transit base64 conversion, TLS store passwords, and
+decoded PEM private key bytes are cleared in `finally` blocks. Catalog
+properties and environment variables are still Java `String` values, so the
+preferred production setup is a local Vault Proxy that owns Vault
+authentication and avoids passing Vault tokens to this JVM.
+
 ## Development
 
 When an Apache Iceberg worktree exists next to this project, Gradle uses a
