@@ -308,6 +308,75 @@ class TestVaultProxyKeyManagementClient {
   }
 
   @Test
+  void sendsConfiguredVendedBearerTokenToProxy() throws Exception {
+    try (LocalVaultProxy proxy = LocalVaultProxy.tcp();
+        KeyManagementClient client = new VaultProxyKeyManagementClient()) {
+      client.initialize(
+          Map.of(
+              VAULT_PROXY_URI,
+              proxy.uri(),
+              VaultProxyProperties.VAULT_PROXY_AUTH_TOKEN,
+              "initial-vault-proxy-token",
+              VaultProxyProperties.VAULT_PROXY_AUTH_TOKEN_EXPIRES_AT_MS,
+              String.valueOf(System.currentTimeMillis() + 3_600_000L)));
+
+      ByteBuffer key = ByteBuffer.wrap("secret-key".getBytes(StandardCharsets.UTF_8));
+      client.wrapKey(key, "table-key");
+
+      assertThat(proxy.requests()).hasSize(1);
+      assertThat(proxy.requests().get(0).headers())
+          .containsEntry("authorization", "Bearer initial-vault-proxy-token")
+          .doesNotContainKey("x-vault-token");
+    }
+  }
+
+  @Test
+  void sendsConfiguredTokenWithoutSchemeToProxy() throws Exception {
+    try (LocalVaultProxy proxy = LocalVaultProxy.tcp();
+        KeyManagementClient client = new VaultProxyKeyManagementClient()) {
+      client.initialize(
+          Map.of(
+              VAULT_PROXY_URI,
+              proxy.uri(),
+              VaultProxyProperties.VAULT_PROXY_AUTH_TOKEN,
+              "scheme-less-vault-proxy-token",
+              VaultProxyProperties.VAULT_PROXY_AUTH_SCHEME,
+              ""));
+
+      ByteBuffer key = ByteBuffer.wrap("secret-key".getBytes(StandardCharsets.UTF_8));
+      client.wrapKey(key, "table-key");
+
+      assertThat(proxy.requests().get(0).headers())
+          .containsEntry("authorization", "scheme-less-vault-proxy-token");
+    }
+  }
+
+  @Test
+  void refreshesVendedBearerTokenFromRestCredentialsEndpoint() throws Exception {
+    try (LocalVaultProxy proxy = LocalVaultProxy.tcp();
+        KeyManagementClient client = new VaultProxyKeyManagementClient()) {
+      client.initialize(
+          Map.of(
+              VAULT_PROXY_URI,
+              proxy.uri(),
+              CatalogProperties.URI,
+              proxy.uri(),
+              VaultProxyProperties.VAULT_PROXY_AUTH_REFRESH_CREDENTIALS_ENDPOINT,
+              "/credentials"));
+
+      ByteBuffer key = ByteBuffer.wrap("secret-key".getBytes(StandardCharsets.UTF_8));
+      client.wrapKey(key, "table-key");
+
+      assertThat(proxy.requests())
+          .extracting(request -> request.method() + " " + request.path())
+          .containsExactly("GET /credentials", "POST /v1/transit/encrypt/table-key");
+      assertThat(proxy.requests().get(1).headers())
+          .containsEntry("authorization", "Bearer refreshed-vault-proxy-token")
+          .doesNotContainKey("x-vault-token");
+    }
+  }
+
+  @Test
   void doesNotLoadSslMaterialForNonHttpsProxy() throws Exception {
     try (LocalVaultProxy proxy = LocalVaultProxy.tcp();
         KeyManagementClient client = new VaultProxyKeyManagementClient()) {

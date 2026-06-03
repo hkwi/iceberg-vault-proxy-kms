@@ -115,6 +115,7 @@ public class VaultProxyKeyManagementClient implements KeyManagementClient {
         uri,
         transitPath,
         properties.get(VaultProxyProperties.VAULT_PROXY_NAMESPACE),
+        new VaultProxyAuthTokenProvider(properties),
         connectTimeoutMs,
         readTimeoutMs,
         sslSocketFactory);

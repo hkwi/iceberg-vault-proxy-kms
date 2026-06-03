@@ -29,6 +29,7 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
 import javax.net.ssl.SSLSocketFactory;
 
@@ -38,17 +39,20 @@ class VaultTransitClient implements Closeable {
 
   private final String transitPath;
   private final String namespace;
+  private final VaultProxyAuthTokenProvider authTokenProvider;
   private final VaultProxyTransport transport;
 
   VaultTransitClient(
       URI endpoint,
       String transitPath,
       String namespace,
+      VaultProxyAuthTokenProvider authTokenProvider,
       int connectTimeoutMs,
       int readTimeoutMs,
       SSLSocketFactory sslSocketFactory) {
     this.transitPath = normalizeTransitPath(transitPath);
     this.namespace = namespace;
+    this.authTokenProvider = authTokenProvider;
     this.transport =
         VaultProxyTransport.create(endpoint, connectTimeoutMs, readTimeoutMs, sslSocketFactory);
   }
@@ -169,11 +173,17 @@ class VaultTransitClient implements Closeable {
   }
 
   private Map<String, String> headers() {
-    if (isNullOrEmpty(namespace)) {
-      return Map.of();
+    Map<String, String> headers = new HashMap<>();
+    if (!isNullOrEmpty(namespace)) {
+      headers.put(NAMESPACE_HEADER, namespace);
     }
 
-    return Map.of(NAMESPACE_HEADER, namespace);
+    String authorizationValue = authTokenProvider.authorizationValue();
+    if (!isNullOrEmpty(authorizationValue)) {
+      headers.put(authTokenProvider.authHeader(), authorizationValue);
+    }
+
+    return Map.copyOf(headers);
   }
 
   private String requestPath(String operation, String keyId) {
@@ -228,6 +238,10 @@ class VaultTransitClient implements Closeable {
 
   @Override
   public void close() {
-    transport.close();
+    try {
+      transport.close();
+    } finally {
+      authTokenProvider.close();
+    }
   }
 }

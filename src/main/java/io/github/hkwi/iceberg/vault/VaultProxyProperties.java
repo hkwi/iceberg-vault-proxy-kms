@@ -28,6 +28,22 @@ public final class VaultProxyProperties {
 
   public static final String VAULT_PROXY_NAMESPACE = "vault-proxy.namespace";
 
+  public static final String VAULT_PROXY_AUTH_TOKEN = "vault-proxy.auth.token";
+  public static final String VAULT_PROXY_AUTH_TOKEN_EXPIRES_AT_MS =
+      "vault-proxy.auth.token-expires-at-ms";
+  public static final String VAULT_PROXY_AUTH_REFRESH_CREDENTIALS_ENDPOINT =
+      "vault-proxy.auth.refresh-credentials-endpoint";
+  public static final String VAULT_PROXY_AUTH_CREDENTIAL_PREFIX =
+      "vault-proxy.auth.credential-prefix";
+  public static final String VAULT_PROXY_AUTH_CREDENTIAL_PREFIX_DEFAULT = "vault-proxy";
+  public static final String VAULT_PROXY_AUTH_HEADER = "vault-proxy.auth.header";
+  public static final String VAULT_PROXY_AUTH_HEADER_DEFAULT = "Authorization";
+  public static final String VAULT_PROXY_AUTH_SCHEME = "vault-proxy.auth.scheme";
+  public static final String VAULT_PROXY_AUTH_SCHEME_DEFAULT = "Bearer";
+  public static final String VAULT_PROXY_AUTH_REFRESH_PREFETCH_MS =
+      "vault-proxy.auth.refresh-prefetch-ms";
+  public static final long VAULT_PROXY_AUTH_REFRESH_PREFETCH_MS_DEFAULT = 300_000L;
+
   public static final String VAULT_PROXY_CONNECT_TIMEOUT_MS = "vault-proxy.connect-timeout-ms";
   public static final int VAULT_PROXY_CONNECT_TIMEOUT_MS_DEFAULT = 5_000;
 
