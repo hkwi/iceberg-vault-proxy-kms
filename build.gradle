@@ -30,6 +30,11 @@ tasks.withType(JavaCompile).configureEach {
   options.release = 17
 }
 
+tasks.withType(org.gradle.api.tasks.bundling.AbstractArchiveTask).configureEach {
+  preserveFileTimestamps = false
+  reproducibleFileOrder = true
+}
+
 test {
   useJUnitPlatform()
 }
