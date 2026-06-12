@@ -27,7 +27,14 @@ spark-sql \
 | --- | --- | --- |
 | `vault-proxy.uri` | `http://127.0.0.1:8200` | Proxy endpoint. Supports `http://...`, `https://...`, and `unix:///path/to/socket`. |
 | `vault-proxy.transit-path` | `transit` | Vault Transit compatible mount/path exposed by the proxy. |
-| `vault-proxy.namespace` | | Value sent as `X-Vault-Namespace`. Vault authentication headers, such as Vault tokens, are not sent by this client and are delegated to the Vault Proxy. |
+| `vault-proxy.namespace` | | Value sent as `X-Vault-Namespace`. Raw Vault authentication headers, such as `X-Vault-Token`, are not sent by this client and are delegated to the Vault Proxy. |
+| `vault-proxy.auth.token` | | Short-lived Vault Proxy authentication token. This is sent to the proxy, not to Vault, as `Authorization: Bearer ...` by default. |
+| `vault-proxy.auth.token-expires-at-ms` | | Expiration time for `vault-proxy.auth.token`, as epoch milliseconds. |
+| `vault-proxy.auth.refresh-credentials-endpoint` | | REST catalog credentials endpoint used to refresh the proxy authentication token. |
+| `vault-proxy.auth.credential-prefix` | `vault-proxy` | Prefix used to select the Vault Proxy credential from a REST `LoadCredentialsResponse`. |
+| `vault-proxy.auth.header` | `Authorization` | HTTP header used for the proxy authentication token. |
+| `vault-proxy.auth.scheme` | `Bearer` | Authentication scheme prepended to `vault-proxy.auth.token`. Set to an empty value to send the token without a scheme. |
+| `vault-proxy.auth.refresh-prefetch-ms` | `300000` | Refresh margin before `vault-proxy.auth.token-expires-at-ms`. |
 | `vault-proxy.connect-timeout-ms` | `5000` | Proxy connection timeout in milliseconds. |
 | `vault-proxy.read-timeout-ms` | `30000` | Proxy read timeout in milliseconds. |
 | `vault-proxy.ssl.keystore.location` | | Client key material file in JKS, PKCS12, or PEM format. |
@@ -59,6 +66,41 @@ file timestamps before creating TLS sockets and reloads the SSL context after a
 timestamp change. Inline PEM values are not reloadable because they have no file
 timestamp.
 
+## REST Credential Vending
+
+With Iceberg REST catalog encryption support, such as Apache Iceberg PR #13225
+or equivalent, the REST catalog creates the KMS client from merged catalog
+properties. Configure this extension as the catalog KMS implementation and let
+the KMS client refresh proxy tokens from the REST credentials endpoint:
+
+```properties
+encryption.kms-impl=io.github.hkwi.iceberg.vault.VaultProxyKeyManagementClient
+vault-proxy.uri=https://vault-proxy.example.internal
+vault-proxy.transit-path=transit
+vault-proxy.auth.refresh-credentials-endpoint=v1/credentials
+```
+
+The credentials endpoint should return a `LoadCredentialsResponse` containing a
+credential for the proxy token:
+
+```json
+{
+  "storage-credentials": [
+    {
+      "prefix": "vault-proxy",
+      "config": {
+        "vault-proxy.auth.token": "eyJ...",
+        "vault-proxy.auth.token-expires-at-ms": "1780495200000"
+      }
+    }
+  ]
+}
+```
+
+The token is a Vault Proxy credential. The proxy should validate it and perform
+Vault Transit access with its own Vault identity or policy. This keeps raw Vault
+tokens out of Spark and other Iceberg clients.
+
 ## Sensitive Memory Handling
 
 Java cannot provide the same process-wide `mlock` semantics as the Go
@@ -73,7 +115,7 @@ Temporary heap arrays used for Vault Transit request/response bodies, TLS store
 passwords, and decoded PEM private key bytes are cleared in `finally` blocks.
 Catalog properties and environment variables are still Java `String` values, so
 the preferred production setup is a local Vault Proxy that owns Vault
-authentication and avoids passing Vault tokens to this JVM.
+authentication and avoids passing raw Vault tokens to this JVM.
 
 ## Development
 

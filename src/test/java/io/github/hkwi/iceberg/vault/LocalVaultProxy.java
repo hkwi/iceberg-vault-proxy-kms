@@ -144,7 +144,9 @@ class LocalVaultProxy implements Closeable {
                 input, "Local Vault proxy received an incomplete HTTP request"),
             StandardCharsets.US_ASCII);
     List<String> lines = List.of(headerText.split("\r\n"));
-    String path = lines.get(0).split(" ", 3)[1];
+    String[] requestLine = lines.get(0).split(" ", 3);
+    String method = requestLine[0];
+    String path = requestLine[1];
 
     Map<String, String> headers = new HashMap<>();
     for (int index = 1; index < lines.size(); index++) {
@@ -162,10 +164,14 @@ class LocalVaultProxy implements Closeable {
             input,
             contentLength,
             "Local Vault proxy request ended before reading Content-Length");
-    return new Request(path, headers, new String(body, StandardCharsets.UTF_8));
+    return new Request(method, path, headers, new String(body, StandardCharsets.UTF_8));
   }
 
   private static String responseBody(Request request) throws IOException {
+    if ("GET".equals(request.method()) && request.path().startsWith("/credentials")) {
+      return credentialsResponseBody();
+    }
+
     JsonNode json = MAPPER.readTree(request.body());
     ObjectNode response = MAPPER.createObjectNode();
     ObjectNode data = response.putObject("data");
@@ -182,6 +188,19 @@ class LocalVaultProxy implements Closeable {
     return MAPPER.writeValueAsString(response);
   }
 
+  private static String credentialsResponseBody() throws IOException {
+    ObjectNode response = MAPPER.createObjectNode();
+    ObjectNode credential = MAPPER.createObjectNode();
+    credential.put("prefix", "vault-proxy");
+    ObjectNode config = credential.putObject("config");
+    config.put(VaultProxyProperties.VAULT_PROXY_AUTH_TOKEN, "refreshed-vault-proxy-token");
+    config.put(
+        VaultProxyProperties.VAULT_PROXY_AUTH_TOKEN_EXPIRES_AT_MS,
+        String.valueOf(System.currentTimeMillis() + 3_600_000L));
+    response.putArray("storage-credentials").add(credential);
+    return MAPPER.writeValueAsString(response);
+  }
+
   @Override
   public void close() throws IOException {
     closed = true;
@@ -192,5 +211,5 @@ class LocalVaultProxy implements Closeable {
     }
   }
 
-  record Request(String path, Map<String, String> headers, String body) {}
+  record Request(String method, String path, Map<String, String> headers, String body) {}
 }
